@@ -18,6 +18,19 @@ PROCESSED_PATH = "/tmp/processed_requests.json"
 
 app = FastAPI()
 
+# === Health Check Endpoints ===
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "message": "TDS Project API is running",
+        "endpoint": "/api-endpoint"
+    }
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "service": "tds-api"}
+
 # === Persistence for processed requests ===
 def load_processed():
     if os.path.exists(PROCESSED_PATH):
