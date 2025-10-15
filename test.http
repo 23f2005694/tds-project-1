@@ -1,0 +1,21 @@
+### Test 1: Simple Counter
+POST  https://tds-project1-nwg4.onrender.com/api-endpoint
+Content-Type: application/json
+
+{
+  "email": "test@ds.study.iitm.ac.in",
+  "secret": "tds-proj1-top-secret",
+  "task": "bill",
+  "round": 1,
+  "nonce": "444colours",
+  "brief": "Make a small web app where users can enter a bill amount and select a tip percentage. Calculate and display the tip amount and total bill dynamically as the user types or selects a tip. Use HTML, CSS, and JavaScript for interactivity. Keep the layout simple and mobile-friendly.",
+  "checks": [
+    "Repo has MIT license",
+    "README.md is professional and complete",
+    "Page has element with id='result'",
+    "Page loads Bootstrap 5 from CDN",
+    "Calculator performs basic arithmetic operations"
+  ],
+  "evaluation_url": "https://webhook.site/e64669ca-0b4b-4bbb-80c6-a037077af5a4",
+  "attachments": []
+}

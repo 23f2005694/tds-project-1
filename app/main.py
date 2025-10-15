@@ -7,9 +7,9 @@ from app.github_utils import (
     create_or_update_file,
     enable_pages,
     generate_mit_license,
+    create_or_update_binary_file
 )
 from app.notify import notify_evaluation_server
-from app.github_utils import create_or_update_binary_file
 
 load_dotenv()
 USER_SECRET = os.getenv("USER_SECRET")
@@ -44,30 +44,35 @@ def process_request(data):
     prev_readme = None
     if round_num == 2:
         try:
+            repo = create_repo(task_id)  # fetch existing repo
             readme = repo.get_contents("README.md")
             prev_readme = readme.decoded_content.decode("utf-8", errors="ignore")
             print("📖 Loaded previous README for round 2 context.")
         except Exception:
             prev_readme = None
 
+    # Generate app code
     gen = generate_app_code(
         data["brief"],
         attachments=attachments,
         checks=data.get("checks", []),
         round_num=round_num,
         prev_readme=prev_readme
-        )
+    )
 
     files = gen.get("files", {})
     saved_info = gen.get("attachments", [])
 
-    # Step 1: Get or create repo
-    repo = create_repo(task_id, description=f"Auto-generated app for task: {data['brief']}")
+    # Step 1: Get or create repo with safe description
+    brief_text = data.get("brief", "")
+    description = f"Auto-generated app for task: {brief_text}"
+    if len(description) > 350:
+        description = description[:347] + "..."
+    repo = create_repo(task_id, description=description)
 
     # Step 2: Round-specific logic
     if round_num == 1:
         print("🏗 Round 1: Building fresh repo...")
-        # Add attachments
         for att in saved_info:
             path = att["name"]
             try:
@@ -84,8 +89,6 @@ def process_request(data):
                 print("⚠ Attachment commit failed:", e)
     else:
         print("🔁 Round 2: Revising existing repo...")
-        # For round 2, update existing code and README
-        # Commit new files on top of existing repo
         for fname, content in files.items():
             create_or_update_file(repo, fname, content, f"Update {fname} for round 2")
 
@@ -96,12 +99,11 @@ def process_request(data):
     mit_text = generate_mit_license()
     create_or_update_file(repo, "LICENSE", mit_text, "Add MIT license")
 
-    # Step 6: Handle GitHub Pages enablement or reuse existing
-    if data["round"] == 1:
+    # Step 4: Handle GitHub Pages enablement or reuse existing
+    if round_num == 1:
         pages_ok = enable_pages(task_id)
         pages_url = f"https://{USERNAME}.github.io/{task_id}/" if pages_ok else None
     else:
-        # For round 2 or later, Pages already exist
         pages_ok = True
         pages_url = f"https://{USERNAME}.github.io/{task_id}/"
 
@@ -120,8 +122,23 @@ def process_request(data):
         "pages_url": pages_url,
     }
 
-    notify_evaluation_server(data["evaluation_url"], payload)
+    # === Notify servers ===
+    try:
+        notify_evaluation_server(data["evaluation_url"], payload)
+        print(f"📤 Sent payload to evaluation server: {data['evaluation_url']}")
+    except Exception as e:
+        print(f"⚠ Failed to notify evaluation server: {e}")
 
+    # Notify user callback if provided
+    user_url = data.get("user_url")
+    if user_url:
+        try:
+            notify_evaluation_server(user_url, payload)
+            print(f"📨 Also notified user callback: {user_url}")
+        except Exception as e:
+            print(f"⚠ Failed to notify user callback: {e}")
+
+    # Save processed info locally
     processed = load_processed()
     key = f"{data['email']}::{data['task']}::round{round_num}::nonce{data['nonce']}"
     processed[key] = payload
@@ -133,10 +150,22 @@ def process_request(data):
 # === Main endpoint ===
 @app.post("/api-endpoint")
 async def receive_request(request: Request, background_tasks: BackgroundTasks):
-    data = await request.json()
-    print("📩 Received request:", data)
+    try:
+        body = await request.body()
+        body_str = body.decode('utf-8')
+        data = json.loads(body_str)
+        print("📩 Received request:", data)
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON Parse Error at line {e.lineno}, column {e.colno}")
+        print(f"Error message: {e.msg}")
+        print(body_str[:1000])
+        start = max(0, e.pos - 50)
+        end = min(len(body_str), e.pos + 50)
+        print(body_str[start:end])
+        print(" " * (e.pos - start) + "^ ERROR HERE")
+        return {"error": f"Invalid JSON: {e.msg} at position {e.pos}"}
 
-    # Step 0: Verify secret
+    # Verify secret
     if data.get("secret") != USER_SECRET:
         print("❌ Invalid secret received.")
         return {"error": "Invalid secret"}
@@ -149,10 +178,12 @@ async def receive_request(request: Request, background_tasks: BackgroundTasks):
         print(f"⚠ Duplicate request detected for {key}. Re-notifying only.")
         prev = processed[key]
         notify_evaluation_server(data.get("evaluation_url"), prev)
+        user_url = data.get("user_url")
+        if user_url:
+            notify_evaluation_server(user_url, prev)
         return {"status": "ok", "note": "duplicate handled & re-notified"}
 
-    # Schedule background task (non-blocking)
+    # Schedule background task
     background_tasks.add_task(process_request, data)
 
-    # Immediate HTTP 200 acknowledgment
     return {"status": "accepted", "note": f"processing round {data['round']} started"}

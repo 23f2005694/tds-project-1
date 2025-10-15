@@ -57,16 +57,16 @@ def summarize_attachment_meta(saved):
                 with open(p, "r", encoding="utf-8", errors="ignore") as f:
                     if nm.endswith(".csv"):
                         lines = [next(f).strip() for _ in range(3)]
-                        preview = "\\n".join(lines)
+                        preview = "\n".join(lines)  # Fixed: removed extra backslash
                     else:
                         data = f.read(1000)
-                        preview = data.replace("\n", "\\n")[:1000]
+                        preview = data.replace("\n", " ")[:1000]  # Fixed: space instead of \\n
                 summaries.append(f"- {nm} ({mime}): preview: {preview}")
             else:
                 summaries.append(f"- {nm} ({mime}): {s['size']} bytes")
         except Exception as e:
             summaries.append(f"- {nm} ({mime}): (could not read preview: {e})")
-    return "\\n".join(summaries)
+    return "\n".join(summaries)  # Fixed: removed extra backslash
 
 def _strip_code_block(text: str) -> str:
     """
@@ -75,11 +75,17 @@ def _strip_code_block(text: str) -> str:
     if "```" in text:
         parts = text.split("```")
         if len(parts) >= 2:
-            return parts[1].strip()
+            # Handle language specifier (e.g., ```html)
+            inner = parts[1]
+            if "\n" in inner:
+                lines = inner.split("\n", 1)
+                if len(lines) > 1:
+                    return lines[1].strip()
+            return inner.strip()
     return text.strip()
 
 def generate_readme_fallback(brief: str, checks=None, attachments_meta=None, round_num=1):
-    checks_text = "\\n".join(checks or [])
+    checks_text = "\n".join(checks or [])  # Fixed: removed extra backslash
     att_text = attachments_meta or ""
     return f"""# Auto-generated README (Round {round_num})
 
@@ -101,7 +107,7 @@ This README was generated as a fallback (OpenAI did not return an explicit READM
 
 def generate_app_code(brief: str, attachments=None, checks=None, round_num=1, prev_readme=None):
     """
-    Generate or revise an app using the OpenAI Responses API.
+    Generate or revise an app using the OpenAI Chat Completions API with gpt-4o-mini.
     - round_num=1: build from scratch
     - round_num=2: refactor based on new brief and previous README/code
     """
@@ -143,15 +149,18 @@ You are a professional web developer assistant.
 """
 
     try:
-        response = client.responses.create(
-            model="gpt-5",
-            input=[
+        # FIXED: Use standard OpenAI Chat Completions API
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
                 {"role": "system", "content": "You are a helpful coding assistant that outputs runnable web apps."},
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
+            max_tokens=4000,
+            temperature=0.7
         )
-        text = response.output_text or ""
-        print("✅ Generated code using new OpenAI Responses API.")
+        text = response.choices[0].message.content or ""
+        print("✅ Generated code using gpt-4o-mini (standard OpenAI API).")
     except Exception as e:
         print("⚠ OpenAI API failed, using fallback HTML instead:", e)
         text = f"""
